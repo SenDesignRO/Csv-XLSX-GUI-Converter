@@ -18,6 +18,7 @@ namespace CsvtoXLSXGUI {
 		MainWindow(void)
 		{
 			InitializeComponent();
+			// The config should be read at the start of the program.
 			manage_config();
 		}
 
@@ -187,14 +188,11 @@ namespace CsvtoXLSXGUI {
 		}
 #pragma endregion
 
-		//this->fileList->DragOver += gcnew DragEventHandler(this, &MainWindow::DragOverHandler);
-		//this->fileList->DragDrop += gcnew DragEventHandler(this, &MainWindow::DragDropHandler);
 	private: System::Void browse_button1_Click(System::Object^  sender, System::EventArgs^  e);
 	private: System::Void deleteButton_Click_1(System::Object^  sender, System::EventArgs^  e);
 	private: System::Void browse_button2_Click(System::Object^  sender, System::EventArgs^  e);
 	private: System::Void startButton_Click(System::Object^  sender, System::EventArgs^  e);
 	private: System::Void DragDropHandler(Object ^sender, DragEventArgs ^args);
 	private: System::Void DragOverHandler(Object ^sender, DragEventArgs ^args);
-
-};
+	};
 }
