@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "xlsxwriter.h"
 #include "config.h"
+#include "xlsxio_read.h"
 
 #include <string>
 #include <iostream>
@@ -45,9 +46,17 @@ bool isCSV(string filename) {
 	return false;
 }
 
+// Verifies if a given file is a XLSX file.
+bool isXLSX(string filename) {
+
+	if (filename.substr(filename.find_last_of(".") + 1) == "xlsx") {
+		return true;
+	}
+	return false;
+}
+
 // Verifies if a file exists. Used to verify if the config file exists or needs to be created.
-bool fexists(const char *filename)
-{
+bool fexists(const char *filename) {
 	ifstream ifile(filename);
 	if (ifile) {
 		return true;
@@ -65,8 +74,7 @@ void generate_config(const std::string& filename) {
 }
 
 // Verifies if the config exists and reads it. If there is no config files, it creates one.
-void MainWindow::manage_config()
-{
+void MainWindow::manage_config() {
 	if (fexists("config.ini")) {
 		config cfg("config.ini");
 		section* pathsection = cfg.get_section("paths");
@@ -74,7 +82,6 @@ void MainWindow::manage_config()
 		if (pathsection != NULL) {
 			String^ aux = gcnew String(cfg.get_value("paths", "outputPath").c_str());
 			output_path->Text = aux;
-
 		}
 		else {
 			generate_config("config.ini");
@@ -116,12 +123,12 @@ void write_worksheet_data(lxw_worksheet* worksheet, lxw_format* bold, string inp
 			size_t pos = 0;
 			// Breaks each string into tokens starting from the delimiter and going backwards.
 			while ((pos = line.find(delimiter)) != string::npos) {
-				// By default, quotes are escaped. This removes the double quotes.
-				line = regex_replace(line, regex("\"\""), "\"");
 				string substr = line.substr(0, pos);
 				string x;
 				x += j;
 				x += to_string(i);
+				// By default, quotes are escaped. This removes the double quotes.
+				substr = regex_replace(substr, regex("\"\""), "\"");
 				const char* c = x.c_str();
 				const char* b = substr.c_str();
 				// Writes the data to the Excel file.
@@ -147,8 +154,7 @@ void write_worksheet_data(lxw_worksheet* worksheet, lxw_format* bold, string inp
 }
 
 // It creates the XLSX file at the given location and passes the CSV file to the parsing function. Returns 0 or an error if the file could not be created.
-bool workbook(string inputPath, string outputPath, int item)
-{
+bool workbook(string inputPath, string outputPath) {
 	const char * path = outputPath.c_str();
 	lxw_workbook* workbook = new_workbook(path);
 	lxw_worksheet* worksheet = workbook_add_worksheet(workbook, NULL);
@@ -157,17 +163,44 @@ bool workbook(string inputPath, string outputPath, int item)
 	return workbook_close(workbook);
 }
 
+// Reads the XLSX file and converts it to CSV. The delimiter used is ",".
+bool csvFile(string inputPath, string outputPath) {
+	// Verifies if file exists.
+	xlsxioreader xlsxioread;
+	if ((xlsxioread = xlsxioread_open(inputPath.c_str())) == NULL) {
+		return false;
+	}
+	char* value;
+	ofstream file(outputPath);
+	// Reads the file.
+	xlsxioreadersheet sheet = xlsxioread_sheet_open(xlsxioread, NULL, XLSXIOREAD_SKIP_EMPTY_ROWS);
+	while (xlsxioread_sheet_next_row(sheet)) {
+		// It creates a buffer string.
+		string line = "\"";;
+		while ((value = xlsxioread_sheet_next_cell(sheet)) != NULL) {
+			line += value;
+			line += "\",\"";
+		}
+		// Removes the delimiter from the end of the buffer string.
+		line.erase(line.size() - 2);
+		// Writes the buffer string into the file.
+		file << line << endl;;
+	}
+	file.close();
+	xlsxioread_sheet_close(sheet);
+	xlsxioread_close(xlsxioread);
+	return true;
+}
+
 // The function for the "Add" button. It adds the choosen file to the main list.
-Void MainWindow::browse_button1_Click(System::Object^  sender, System::EventArgs^  e)
-{
+Void MainWindow::browse_button1_Click(System::Object^  sender, System::EventArgs^  e) {
 	OpenFileDialog^ openFileDialog1 = gcnew OpenFileDialog;
 
 	openFileDialog1->InitialDirectory = "c:\\";
-	openFileDialog1->Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
-	openFileDialog1->FilterIndex = 2;
+	openFileDialog1->Filter = "CSV files (*.csv)|*.csv|Excel files (*.xslx)|*.xlsx |All files (*.*)|*.*";
+	openFileDialog1->FilterIndex = 1;
 	openFileDialog1->RestoreDirectory = true;
-	if (openFileDialog1->ShowDialog() == ::DialogResult::OK);
-	{
+	if (openFileDialog1->ShowDialog() == ::DialogResult::OK) {
 		String^ folderName = openFileDialog1->FileName;
 		ListViewItem^  listViewItem1 = (gcnew System::Windows::Forms::ListViewItem(gcnew cli::array< System::String^  >(3) {
 			gcnew String(returnFileName(folderName).c_str()), folderName, L"Pending..."
@@ -178,11 +211,9 @@ Void MainWindow::browse_button1_Click(System::Object^  sender, System::EventArgs
 }
 
 // The function for the "Browse" button. It is used to point to the output path and add it to both the label and the config file.
-Void MainWindow::browse_button2_Click(System::Object^  sender, System::EventArgs^  e)
-{
+Void MainWindow::browse_button2_Click(System::Object^  sender, System::EventArgs^  e) {
 	FolderBrowserDialog^ folderBrowserDialog = gcnew FolderBrowserDialog;
-	if (folderBrowserDialog->ShowDialog() == ::DialogResult::OK);
-	{
+	if (folderBrowserDialog->ShowDialog() == ::DialogResult::OK) {
 		String^ folderName = folderBrowserDialog->SelectedPath + "\\";
 		output_path->Text = folderName;
 		change_config("paths", "outputPath", convertToString(folderName));
@@ -194,26 +225,33 @@ Void MainWindow::startButton_Click(System::Object^  sender, System::EventArgs^  
 
 	// Verifies if the Outpuh directory exists.
 	if (!String::IsNullOrWhiteSpace(output_path->Text)) {
-		for (int i = 0; i < fileList->Items->Count; i++)
-		{
+		for (int i = 0; i < fileList->Items->Count; i++) {
 			// Skips the already converted files. 
 			if (!String::Equals(fileList->Items[i]->SubItems[2]->Text, L"Finished")) {
 				string filename = convertToString(fileList->Items[i]->SubItems[0]->Text);
 				// Removes the extension from the filename. 
 				const size_t period_idx = filename.rfind('.');
 				if (std::string::npos != period_idx)
-				{
 					filename.erase(period_idx);
+
+				// Generates the output filenames from the input ones and adds the new extension depending of the file type. 
+				if (isCSV(convertToString(fileList->Items[i]->SubItems[1]->Text))) {
+					string outputPath = convertToString(output_path->Text) + filename + ".xlsx";
+					// If the file is sucessfuly created, it marks the conversion as finished in the third column of the list. 
+					if (workbook(convertToString(fileList->Items[i]->SubItems[1]->Text), outputPath) == 0)
+						fileList->Items[i]->SubItems[2]->Text = L"Finished";
+					else
+						// Otherwise, it displays an error.
+						fileList->Items[i]->SubItems[2]->Text = L"Error";
 				}
-				// Generates the output filenames from the input ones and adds the new extension. 
-				string outputPath = convertToString(output_path->Text) + filename + ".xlsx";
-				// If the file is sucessfuly created, it marks the conversion as finished in the third column of the list. 
-				if (workbook(convertToString(fileList->Items[i]->SubItems[1]->Text), outputPath, i) == 0) {
-					fileList->Items[i]->SubItems[2]->Text = L"Finished";
-				}
-				else {
-					// Otherwise, it displays an error.
-					fileList->Items[i]->SubItems[2]->Text = L"Error";
+				else if (isXLSX(convertToString(fileList->Items[i]->SubItems[1]->Text))) {
+					string outputPath = convertToString(output_path->Text) + filename + ".csv";
+					// If the file is sucessfuly created, it marks the conversion as finished in the third column of the list. 
+					if (csvFile(convertToString(fileList->Items[i]->SubItems[1]->Text), outputPath) == 1)
+						fileList->Items[i]->SubItems[2]->Text = L"Finished";
+					else
+						// Otherwise, it displays an error.
+						fileList->Items[i]->SubItems[2]->Text = L"Error";
 				}
 			}
 		}
@@ -222,10 +260,13 @@ Void MainWindow::startButton_Click(System::Object^  sender, System::EventArgs^  
 		MessageBox::Show("You must select an output folder before starting the conversion.");
 	}
 }
+// The function for the "About" button. 
+Void MainWindow::about_Click(System::Object^  sender, System::EventArgs^  e) {
+	MessageBox::Show("Software developed by Victor Marcoianu.\nOfficial Repository can be found here https://github.com/SenFire/Csv-to-XLSX-GUI-Converter");
+}
 
 // Handles the drag over effect. It only allows files to be dropped into the list. 
 Void MainWindow::DragOverHandler(Object ^sender, DragEventArgs ^args) {
-
 	if (args->Data->GetDataPresent(DataFormats::FileDrop))
 		args->Effect = args->AllowedEffect & DragDropEffects::Link;
 	else
@@ -242,7 +283,7 @@ Void MainWindow::DragDropHandler(Object ^sender, DragEventArgs ^args) {
 			int i = 0;
 			// For each file dropped, it verifies if it's a CSV file and then it adds it to the list.
 			for each (String^ path in filePaths) {
-				if (isCSV(returnFileName(filePaths[i]).c_str())) {
+				if (isCSV(returnFileName(filePaths[i]).c_str()) || isXLSX(returnFileName(filePaths[i]).c_str())) {
 					ListViewItem^  listViewItem1 = (gcnew System::Windows::Forms::ListViewItem(gcnew cli::array< System::String^  >(3) {
 						gcnew String(returnFileName(filePaths[i]).c_str()), filePaths[i], L"Pending..."
 					}, -1));
@@ -257,13 +298,15 @@ Void MainWindow::DragDropHandler(Object ^sender, DragEventArgs ^args) {
 // Deletes selected items from the list.
 Void MainWindow::deleteButton_Click_1(System::Object^  sender, System::EventArgs^  e) {
 	if (fileList->SelectedItems->Count > 0)
-	{
 		for (int i = fileList->Items->Count - 1; i >= 0; i--)
-		{
 			if (fileList->Items[i]->Selected)
-			{
 				fileList->Items[i]->Remove();
-			}
-		}
-	}
+}
+
+// Allows deletion of items from the list by pressing the Delete key.
+Void MainWindow::fileList_KeyDown(System::Object^  sender, System::Windows::Forms::KeyEventArgs^  e) {
+	if ((e->KeyCode == Keys::Delete) && fileList->SelectedItems->Count > 0)
+		for (int i = fileList->Items->Count - 1; i >= 0; i--)
+			if (fileList->Items[i]->Selected)
+				fileList->Items[i]->Remove();
 }
